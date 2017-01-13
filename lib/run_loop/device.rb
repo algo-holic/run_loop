@@ -342,26 +342,14 @@ version: #{version}
         sleep(0.5)
       end
 
-      is_stable = false
       if required.empty?
         elapsed = Time.now - now
         RunLoop.log_debug("All required simulator processes have started after #{elapsed}")
-        current_dir_sha = simulator_data_directory_sha
-        while Time.now < poll_until do
-          latest_dir_sha = simulator_data_directory_sha
-          is_stable = current_dir_sha == latest_dir_sha
-          if is_stable
-            RunLoop.log_debug("Simulator data directory has stabilized")
-            break
-          else
-            sleep(1.0)
-          end
-        end
-      end
-
-      if is_stable
+        delay = RunLoop::Environment.ci? ? 10 : 5
+        RunLoop.log_debug("Waiting an additional #{delay} seconds for simulator to stabilize")
+        sleep(delay)
         elapsed = Time.now - now
-        RunLoop.log_debug("Waited a total of #{elapsed} seconds for simulator to stabilize")
+        RunLoop.log_debug("Waited for #{elapsed} seconds for simulator to stabilize")
       else
         RunLoop.log_debug("Timed out after #{timeout} seconds waiting for simulator to stabilize")
       end
