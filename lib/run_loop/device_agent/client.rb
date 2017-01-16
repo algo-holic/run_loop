@@ -329,7 +329,9 @@ INSTANCE METHODS
 
       # @!visibility private
       def clear_text
-        options = enter_text_http_options
+        # Tries to touch the keyboard delete key, but falls back on typing the
+        # backspace character.
+        options = enter_text_http_options("\b")
         parameters = {
           :gesture => "clear_text"
         }
@@ -344,7 +346,7 @@ INSTANCE METHODS
         if !keyboard_visible?
           raise RuntimeError, "Keyboard must be visible"
         end
-        options = enter_text_http_options
+        options = enter_text_http_options(string.to_s)
         parameters = {
           :gesture => "enter_text",
           :options => {
@@ -364,7 +366,7 @@ INSTANCE METHODS
       # 1. Removes duplicate check.
       # 2. It turns out DeviceAgent query can be very slow.
       def enter_text_without_keyboard_check(string)
-        options = enter_text_http_options
+        options = enter_text_http_options(string.to_s)
         parameters = {
           :gesture => "enter_text",
           :options => {
@@ -1114,8 +1116,10 @@ PRIVATE
       # @!visibility private
       #
       # A patch while we are trying to figure out what is wrong with text entry.
-      def enter_text_http_options
-        timeout = DEFAULTS[:http_timeout] * 6
+      def enter_text_http_options(string)
+        characters = string.length + 1
+        to_type_timeout = [characters/12, 2.0].max
+        timeout = (DEFAULTS[:http_timeout] * 3) + to_type_timeout
         {
           :timeout => timeout,
           :interval => 0.1,
@@ -1223,21 +1227,25 @@ PRIVATE
         hash
       end
 
-      # TODO Might not be necessary - this is an edge case and it is likely
-      # that iOSDeviceManager will be able to handle this for us.
+      # @!visibility private
       def cbx_runner_stale?
-        false
-        # The RunLoop::Version class needs to be updated to handle timestamps.
-        #
-        # if cbx_launcher.name == :xcodebuild
-        #   return false
-        # end
+        return false if RunLoop::Environment.xtc?
+        return false if cbx_launcher.name == :xcodebuild
+        return false if !running?
 
-        # version_info = server_version
-        # running_bundle_version = RunLoop::Version.new(version_info[:bundle_version])
-        # bundle_version = RunLoop::App.new(cbx_launcher.runner.runner).bundle_version
-        #
-        # running_bundle_version < bundle_version
+        version_info = server_version
+        running_version_timestamp = version_info[:bundle_version].to_i
+
+        app = RunLoop::App.new(cbx_launcher.runner.runner)
+        version_timestamp = plist_buddy.plist_read("CFBundleVersion", app.info_plist_path).to_i
+
+        if running_version_timestamp == version_timestamp
+          RunLoop.log_debug("The running DeviceAgent version is the same as the version on disk")
+          false
+        else
+          RunLoop.log_debug("The running DeviceAgent version is not the same as the version on disk")
+          true
+        end
       end
 
       # @!visibility private

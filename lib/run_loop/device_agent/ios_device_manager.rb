@@ -98,6 +98,8 @@ but binary does not exist at that path.
           sim = CoreSimulator.new(device, cbxapp, {:quit_sim_on_init => false})
           sim.install
           sim.launch_simulator
+
+          device.simulator_update_plists_for_device_agent_testing
         else
 
           if !install_timeout

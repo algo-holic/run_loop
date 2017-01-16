@@ -323,6 +323,7 @@ version: #{version}
 
     # @!visibility private
     def simulator_wait_for_stable_state
+      data_path = File.join(simulator_root_dir, 'data')
       required = simulator_required_child_processes
 
       timeout = SIM_STABLE_STATE_OPTIONS[:timeout]
@@ -330,8 +331,22 @@ version: #{version}
       poll_until = now + timeout
 
       RunLoop.log_debug("Waiting for simulator to stabilize with timeout: #{timeout} seconds")
+      footprint = RunLoop::Directory.size(data_path, :mb)
+
+      if version.major >= 9 && footprint < 18
+        first_launch = true
+      elsif version.major == 8
+        if version.minor >= 3 && footprint < 19
+          first_launch = true
+        else
+          first_launch = footprint < 11
+        end
+      else
+        first_launch = true
+      end
 
       while !required.empty? && Time.now < poll_until do
+        sleep(0.5)
         required = required.map do |process_name|
           if simulator_process_running?(process_name)
             nil
@@ -339,29 +354,15 @@ version: #{version}
             process_name
           end
         end.compact
-        sleep(0.5)
       end
 
-      is_stable = false
       if required.empty?
         elapsed = Time.now - now
         RunLoop.log_debug("All required simulator processes have started after #{elapsed}")
-        current_dir_sha = simulator_data_directory_sha
-        while Time.now < poll_until do
-          latest_dir_sha = simulator_data_directory_sha
-          is_stable = current_dir_sha == latest_dir_sha
-          if is_stable
-            RunLoop.log_debug("Simulator data directory has stabilized")
-            break
-          else
-            sleep(1.0)
-          end
+        if first_launch
+          sleep(5)
         end
-      end
-
-      if is_stable
-        elapsed = Time.now - now
-        RunLoop.log_debug("Waited a total of #{elapsed} seconds for simulator to stabilize")
+        RunLoop.log_debug("Waited for #{elapsed} seconds for simulator to stabilize")
       else
         RunLoop.log_debug("Timed out after #{timeout} seconds waiting for simulator to stabilize")
       end
@@ -461,6 +462,144 @@ failed with this output:
       end
 
       simulator_languages
+    end
+
+    # @!visibility private
+    def simulator_chmod_keyboard_services
+      plist = File.join(simulator_root_dir,
+                        "data", "Library", "Preferences",
+                        "com.apple.textInput.keyboardServices.textReplacement.plist")
+      if File.exist?(plist)
+        cmd = ["chmod", "600", plist]
+        hash = run_shell_command(cmd, {:log_cmd => true})
+
+        if hash[:exit_status] != 0
+          raise RuntimeError, %Q[
+Could not change file permissions:
+
+#{cmd.join(" ")}
+
+failed with this output:
+
+#{hash[:out]}
+
+]
+        end
+      end
+    end
+
+    # @!visibility private
+    def simulator_update_routined_timestamps
+      plist = File.join(simulator_root_dir,
+                        "data", "Library", "Preferences", "com.apple.routined.plist")
+      if File.exist?(plist)
+        ["LastAssetUpdateDate", "LastRoutineStateModelSyncDate",
+         "LastSuccessfulAssetUpdateDate", "MigrationLastMigrationDate",
+         "MigrationLastSuccessfulMigrationDate"].each do |key|
+          pbuddy.plist_advance_date_by_day(key, plist)
+        end
+      end
+    end
+
+    # @!visibility private
+    def simulator_remove_accessibility_available_voices
+      plist = File.join(simulator_root_dir,
+                        "data", "Library", "Preferences", "com.apple.Accessibility.plist")
+      if File.exist?(plist)
+        key = "AllAvailableVoicesPreference"
+        value = pbuddy.plist_read(key, plist)
+
+        if value
+          cmd = ["/usr/libexec/PlistBuddy", "-c", "Delete :AllAvailableVoicesPreference", plist]
+          hash = run_shell_command(cmd, {:log_cmd => true})
+          if hash[:exit_status] != 0
+            raise RuntimeError, %Q[
+Could not remove AvailableVoicesPreference in simulator:
+
+#{cmd.join(" ")}
+
+failed with this output:
+
+#{hash[:out]}
+
+            ]
+          end
+        end
+      end
+    end
+
+    # @!visibility private
+    def simulator_update_apsd_persistent_topics
+      plist = File.join(simulator_root_dir,
+                        "data", "Library", "Preferences", "com.apple.apsd.plist")
+      if File.exist?(plist)
+        key = "APSPersistentTopics:com.apple.ak.aps.sim:enableStatusUpdates"
+        value = pbuddy.plist_read(key, plist)
+        cmd = nil
+        if value.nil?
+          cmd = ["/usr/libexec/PlistBuddy", "-c", "Add #{key} bool true", plist]
+        elsif !value
+          cmd = ["/usr/libexec/PlistBuddy", "-c", "Set #{key} bool true", plist]
+        end
+
+        if cmd
+          hash = run_shell_command(cmd, {:log_cmd => true})
+
+          if hash[:exit_status] != 0
+            raise RuntimeError, %Q[
+Could not set APSPersistentTopics in simulator:
+
+#{cmd.join(" ")}
+
+failed with this output:
+
+#{hash[:out]}
+
+]
+          end
+        end
+      end
+    end
+
+    # @!visibility private
+    def simulator_update_xpc_activity_timestamps
+      plist = File.join(simulator_root_dir,
+                        "data", "Library", "Preferences", "com.apple.xpc.activity2.plist")
+      if File.exist?(plist)
+        ["PDCardFileManager.CacheMaintenance",
+         "PDCardFileManager.RevocationCheck",
+         "com.apple.FitnessFriends.PeriodicUpdateActivity",
+         "com.apple.cloudkit.pcs.memorycache.evict",
+         "com.apple.photoanalysisd.backgroundanalysis",
+         "com.apple.KeyboardServices.TextReplacementCKSyncTask",
+         "com.apple.assetsd.periodicmaintenance",
+         "com.apple.routined.sequentialClusterIdentification",
+         "com.apple.cloudkit.packageGarbageCollection",
+         "com.apple.suggestions.harvest"
+        ].each do |key|
+          pbuddy.plist_advance_date_by_day(key, plist)
+        end
+      end
+    end
+
+    # @!visibility private
+    def simulator_update_accessibility_ui_server_date
+      plist = File.join(simulator_root_dir,
+                        "data", "Library", "Preferences",
+                        "com.apple.accessibility.AccessibilityUIServer.plist")
+      if File.exist?(plist)
+        pbuddy.plist_advance_date_by_day("LastSpeechAssetUpdateCheck", plist)
+      end
+    end
+
+    # @!visibility private
+    def simulator_update_plists_for_device_agent_testing
+      simulator_update_apsd_persistent_topics
+      simulator_remove_accessibility_available_voices
+      simulator_update_xpc_activity_timestamps
+      simulator_update_accessibility_ui_server_date
+      simulator_update_routined_timestamps
+      simulator_chmod_keyboard_services
     end
 
 =begin

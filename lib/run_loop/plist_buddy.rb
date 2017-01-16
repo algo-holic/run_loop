@@ -6,6 +6,23 @@ module RunLoop
   # is problematic for our purposes.
   class PlistBuddy
 
+    def plist_advance_date_by_day(key, file)
+      string = PlistBuddy.string_for_date(Time.now, 24 * 60 * 60)
+      plist_set(key, "date", string, file)
+    end
+
+    def plist_set_date_for_key(key, time, file)
+      string = PlistBuddy.string_for_date(time)
+      plist_set(key, "date", string, file)
+    end
+
+    def self.string_for_date(time, offset_time_by_seconds=0)
+      zone =  Time.now.strftime("%Z")
+      format = "%a %b %-d %H:%M:%S #{zone} %Y"
+      offset_time = time + offset_time_by_seconds
+      offset_time.strftime(format)
+    end
+
     # Reads key from file and returns the result.
     # @param [String] key the key to inspect (may not be nil or empty)
     # @param [String] file the plist to read
@@ -149,7 +166,7 @@ module RunLoop
           unless value_type
             raise(ArgumentError, ':value_type is a required key for :add command')
           end
-          allowed_value_types = ['string', 'bool', 'real', 'integer']
+          allowed_value_types = ["date", 'string', 'bool', 'real', 'integer']
           unless allowed_value_types.include?(value_type)
             raise(ArgumentError, "expected '#{value_type}' to be one of '#{allowed_value_types}'")
           end

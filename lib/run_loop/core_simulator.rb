@@ -72,7 +72,15 @@ class RunLoop::CoreSimulator
               "CoreSimulatorBridge",
 
               # Xcode 7
-              "ids_simd"
+              "ids_simd",
+
+              "UserEventAgent",
+              "aslmanager",
+              "cfprefsd",
+              "MobileSMSSpotlightImporter",
+              "mobileassetd",
+              "kbd"
+
         ]
 
   # @!visibility private
